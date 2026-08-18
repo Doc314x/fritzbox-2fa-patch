@@ -30,58 +30,137 @@ from . import session
 # ── Schiebeschalter (Canvas-Widget im iOS-Stil) ─────────────────────────────
 
 class ToggleSwitch(tk.Canvas):
-    """Ein zentrierter Ein/Aus-Schiebeschalter. Ein Klick ruft `command(neuer_zustand)`
-    auf; programmatisches Setzen via set_state() löst `command` bewusst NICHT aus."""
+    """Zentrierter Ein/Aus-Schiebeschalter im iOS-Stil, mit weicher Slide-
+    Animation, Knopfschatten und Hover. Ein Klick ruft `command(neuer_zustand)`
+    auf; programmatisches Setzen via set_state() löst `command` bewusst NICHT aus.
 
-    def __init__(self, master, command=None, width=150, height=60, **kw):
+    Gezeichnet mit gestapelten Ovalen (kein echtes Anti-Aliasing im Tk-Canvas,
+    aber durch einen dünnen, leicht helleren Rand wirken die Kanten ruhiger)."""
+
+    # Farbpaletten je Zustand: (Track, Track-Rand)
+    _TRACK_ON = ("#22c55e", "#16a34a")
+    _TRACK_ON_HOVER = ("#16a34a", "#15803d")
+    _TRACK_OFF = ("#cbd5e1", "#b6c2d1")
+    _TRACK_OFF_HOVER = ("#b8c2d0", "#a3b0c0")
+    _TRACK_DISABLED = ("#e5e7eb", "#e5e7eb")
+
+    def __init__(self, master, command=None, width=176, height=68, **kw):
+        bg = "#f0f0f0"
+        try:
+            bg = ttk.Style().lookup("TFrame", "background") or bg
+        except tk.TclError:
+            pass
         super().__init__(master, width=width, height=height,
-                         highlightthickness=0, bd=0, **kw)
+                         highlightthickness=0, bd=0, bg=bg, **kw)
         self._cw, self._ch = width, height
         self._on = False
         self._enabled = True
+        self._hover = False
         self._command = command
+        self._pos = 0.0          # 0.0 = aus (Knopf links) … 1.0 = an (rechts)
+        self._anim = None
+        self.configure(cursor="hand2")
         self.bind("<Button-1>", self._clicked)
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
         self._render()
 
-    def _colors(self):
+    # ── Zeichnen ────────────────────────────────────────────────────────────
+
+    def _track_colors(self):
         if not self._enabled:
-            return "#4b5563", "#9ca3af"      # track, knob (ausgegraut)
-        return ("#22c55e" if self._on else "#9aa3af"), "#ffffff"
+            return self._TRACK_DISABLED
+        if self._on:
+            return self._TRACK_ON_HOVER if self._hover else self._TRACK_ON
+        return self._TRACK_OFF_HOVER if self._hover else self._TRACK_OFF
+
+    def _pill(self, x0, y0, x1, y1, fill, outline):
+        r = (y1 - y0) / 2
+        self.create_oval(x0, y0, x0 + 2 * r, y1, fill=fill, outline=outline)
+        self.create_oval(x1 - 2 * r, y0, x1, y1, fill=fill, outline=outline)
+        self.create_rectangle(x0 + r, y0, x1 - r, y1, fill=fill, outline=fill)
+        # obere/untere Kante nachziehen, damit der Rand rundum gleich wirkt
+        self.create_line(x0 + r, y0, x1 - r, y0, fill=outline)
+        self.create_line(x0 + r, y1, x1 - r, y1, fill=outline)
 
     def _render(self):
         self.delete("all")
-        p = 5
+        p = 6
         w, h = self._cw, self._ch
         r = (h - 2 * p) / 2
-        track, knob = self._colors()
-        # Pille: zwei Kreise + Rechteck
-        self.create_oval(p, p, p + 2 * r, h - p, fill=track, outline=track)
-        self.create_oval(w - p - 2 * r, p, w - p, h - p, fill=track, outline=track)
-        self.create_rectangle(p + r, p, w - p - r, h - p, fill=track, outline=track)
-        # Knopf links (aus) oder rechts (an)
-        kx = (w - p - 2 * r) if self._on else p
-        self.create_oval(kx, p, kx + 2 * r, h - p, fill=knob, outline="#e5e7eb")
-        # Beschriftung im Track
-        label = "AN" if self._on else "AUS"
-        tx = p + r if self._on else w - p - r
-        self.create_text(tx, h / 2, text=label, fill="white",
-                         font=("Segoe UI", int(r * 0.7), "bold"))
+        track, track_edge = self._track_colors()
+        self._pill(p, p, w - p, h - p, track, track_edge)
+
+        # Beschriftung gegenüber dem Knopf (bleibt lesbar, wandert nicht mit)
+        if self._enabled:
+            if self._pos >= 0.5:
+                self.create_text(p + r + 4, h / 2, text="AN", anchor="w",
+                                 fill="white", font=("Segoe UI", int(r * 0.62), "bold"))
+            else:
+                self.create_text(w - p - r - 4, h / 2, text="AUS", anchor="e",
+                                 fill="#5b6472", font=("Segoe UI", int(r * 0.62), "bold"))
+
+        # Knopf mit weichem Schatten
+        travel = (w - 2 * p) - 2 * r
+        kx = p + self._pos * travel
+        knob = "#f9fafb" if self._enabled else "#f3f4f6"
+        ring = "#cbd5e1" if self._enabled else "#e5e7eb"
+        self.create_oval(kx + 1.5, p + 2.5, kx + 2 * r + 1.5, h - p + 2.5,
+                         fill="#c9cdd4", outline="")             # weicher Schatten
+                                                                 # (Tk kennt kein Alpha)
+        self.create_oval(kx, p, kx + 2 * r, h - p, fill=knob, outline=ring)
+        self.create_oval(kx + r * 0.62, p + r * 0.62,
+                         kx + 2 * r - r * 0.62, h - p - r * 0.62,
+                         fill="", outline=ring)                  # feiner Innenring
+
+    # ── Animation ───────────────────────────────────────────────────────────
+
+    def _animate_to(self, target):
+        if self._anim is not None:
+            self.after_cancel(self._anim)
+            self._anim = None
+
+        def step():
+            d = target - self._pos
+            if abs(d) < 0.05:
+                self._pos = target
+                self._render()
+                self._anim = None
+                return
+            self._pos += d * 0.34          # ease-out
+            self._render()
+            self._anim = self.after(16, step)
+
+        step()
+
+    # ── Ereignisse ──────────────────────────────────────────────────────────
 
     def _clicked(self, _evt):
         if not self._enabled or self._command is None:
             return
         self._command(not self._on)
 
-    # öffentliche API
-    def set_state(self, on: bool):
-        self._on = bool(on)
+    def _set_hover(self, hover):
+        self._hover = hover
         self._render()
+
+    # ── öffentliche API ─────────────────────────────────────────────────────
+
+    def set_state(self, on: bool, animate: bool = True):
+        self._on = bool(on)
+        target = 1.0 if self._on else 0.0
+        if animate and self.winfo_ismapped():
+            self._animate_to(target)
+        else:
+            self._pos = target
+            self._render()
 
     def get_state(self) -> bool:
         return self._on
 
     def set_enabled(self, enabled: bool):
         self._enabled = bool(enabled)
+        self.configure(cursor="hand2" if enabled else "arrow")
         self._render()
 
 
@@ -153,7 +232,7 @@ class App:
                                   font=("Segoe UI", 11, "bold"))
         self.headline.grid(row=r, column=0, columnspan=2)
         r += 1
-        self.switch = ToggleSwitch(frm, command=self.on_toggle, width=160, height=64)
+        self.switch = ToggleSwitch(frm, command=self.on_toggle, width=176, height=68)
         self.switch.grid(row=r, column=0, columnspan=2, pady=10)
         self.switch.set_enabled(False)
         r += 1
