@@ -38,36 +38,33 @@ vierfach unabhängig:**
 
 Rundlauf getestet (aus → an → aus), jedes Mal selbstverifizierend.
 
-## Der Weg, der NICHT funktioniert: Config-Datei patchen
+## Alternativer Weg: Config-Datei patchen (funktioniert auch, mit Neustart)
 
-Community-Quellen (Foren, Blogs) beschreiben einen älteren Workaround:
-Config exportieren, `two_factor_auth_enabled = yes;` in der Sicherungsdatei
-von Hand auf `no` ändern, Prüfsumme neu berechnen, Datei wieder einspielen.
-Dieser Weg ist in diesem Repo ebenfalls implementiert (`fb2fa export`,
-`fb2fa patch`, `fb2fa import-all`) — **er wirkt aber nachweislich nicht**
-mehr (mindestens ab FRITZ!OS 8.25 auf der 7590):
+Der klassische Community-Workaround: Config exportieren,
+`two_factor_auth_enabled = yes;` in der Sicherungsdatei von Hand auf `no`
+ändern (z. B. mit dem [Fritz!Box JSTool von Michael
+Engelke](https://www.mengelke.de/)), Prüfsumme neu berechnen, Datei wieder
+einspielen. Dieser Weg ist in diesem Repo ebenfalls implementiert (`fb2fa
+export`, `fb2fa patch`, `fb2fa import-all`).
 
-- Zweifach mit sauberer Kontrollprobe getestet: ein Nachbarfeld im selben
-  Konfigurationsblock (`tfa_cfg_version`) wurde probeweise geändert und hat
-  einen vollständigen Reimport + Neustart nachweislich überstanden — nur
-  `two_factor_auth_enabled` selbst bleibt unverändert, obwohl exakt
-  derselbe Mechanismus für beide Felder verwendet wird.
-- AVM schützt dieses eine Feld also gezielt vor Config-Import — vermutlich
-  bewusst, weil ein per Datei importierbarer "2FA aus"-Schalter ein
-  offensichtliches Sicherheitsloch wäre.
-- Die Module (`fb2fa/cfgfile.py`, `fb2fa/session.py` Export/Import-Teil)
-  bleiben im Repo, weil der CRC32-Mechanismus für andere Einstellungen
-  durchaus funktioniert (per Kontrollprobe bestätigt) — nur eben nicht für
-  dieses eine, geschützte Feld. Siehe Code-Kommentare in `session.py` bei
-  `set_additional_confirmation()` für die Details der Verifikation.
+**Klargestellt per echtem Vergleichstest:** Über den echten Browser/das
+JSTool + reguläre "Wiederherstellen"-Funktion der Box **funktioniert das**
+— sauber verifiziert mit einem unkontaminierten Test (frischer Export vor
+jeder Änderung → lokal gepatcht → reimportiert → Neustart anhand
+zurückgesetztem internen Zeitstempel bestätigt → frischer Export danach
+zeigt `two_factor_auth_enabled = no`). Löst dabei, anders als `fb2fa 2fa`,
+einen Neustart aus (Telefonie/Internet kurz weg).
 
-**Falsche Positive vermeiden:** Bei den ersten Tests schien der
-Config-Patch-Weg zunächst zu wirken (2FA-freies Verhalten nach Reimport +
-Reboot) — das stellte sich bei genauerer Prüfung als Nebeneffekt heraus,
-nicht als echte, verstandene Ursache. Deshalb: bei sicherheitsrelevanten
-Ergebnissen immer den tatsächlichen Zustand aus mehreren unabhängigen
-Quellen verifizieren (Config-Wert UND Verhalten UND TR-064-Status), nicht
-nur eine einzelne "hat geklappt"-Beobachtung für bare Münze nehmen.
+**Offene Frage:** Die eigene, rein API-gesteuerte Nachbildung dieses
+Ablaufs in `fb2fa import-all` (ohne echten Browser) hat in zwei eigenen
+Tests **nicht** funktioniert, obwohl eine Kontrollprobe (`tfa_cfg_version`
+in einem Nachbarfeld geändert) im selben Lauf korrekt persistiert wurde.
+Es muss also einen Unterschied zwischen dem echten Browser-Upload und dem
+hier implementierten Multipart-Request geben, der bislang nicht gefunden
+wurde — `fb2fa import-all` sollte deshalb noch nicht blind vertraut werden,
+auch wenn der CRC32-Mechanismus selbst (Prüfsummenberechnung) nachweislich
+korrekt arbeitet. Für produktiven Einsatz bis auf Weiteres: `fb2fa 2fa`
+(oben) oder der manuelle Weg über die echte WebGUI/das JSTool.
 
 ## Setup
 
