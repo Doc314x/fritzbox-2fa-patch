@@ -28,7 +28,12 @@ jobs:
       - name: .exe bauen (onefile, ohne Konsolenfenster)
         run: pyinstaller --onefile --windowed --name fb2fa fb2fa_gui.py
 
-      - name: Artefakt hochladen (für manuelle Läufe)
+      - name: Artefakt hochladen (nur bei manuellen Läufen)
+        # Bei Tag-Builds übersprungen: dort ist das Release das Ergebnis, nicht
+        # das Artefakt. continue-on-error, damit ein volles Artefakt-Kontingent
+        # niemals den Release-Schritt blockiert.
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: fb2fa-windows-exe
