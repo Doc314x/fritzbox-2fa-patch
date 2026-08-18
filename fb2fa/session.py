@@ -124,6 +124,17 @@ def _is_login_page(body: str) -> bool:
 
 # ── Login ─────────────────────────────────────────────────────────────────
 
+def list_users(host: str, timeout: float = 8) -> list[str]:
+    """Liest die FRITZ!Box-Benutzernamen aus – ganz ohne Anmeldung, denn die
+    Challenge-Antwort von login_sid.lua enthält sie bereits als
+    <Users><User ...>name</User></Users>. Für die GUI, damit man nach Eingabe
+    der IP den Benutzer nur noch auswählen muss."""
+    xml = _get(f"http://{host}/login_sid.lua?version=2", timeout)
+    # (?:\s[^>]*)? statt [^>]* – sonst matcht <User ...> auch das umschließende
+    # <Users>-Tag mit und verschluckt den echten Benutzernamen.
+    return re.findall(r"<User(?:\s[^>]*)?>(.*?)</User>", xml)
+
+
 def login(host: str, user: str, password: str, timeout: float = 10) -> str:
     challenge_url = f"http://{host}/login_sid.lua?version=2"
     xml = _get(challenge_url, timeout)
@@ -216,37 +227,51 @@ def run_twofactor(host: str, sid: str, timeout: float = 10,
         raise TwoFactorBusy(int(code_str) if code_str.isdigit() else -1)
 
     state = _split_state(state_raw)
-    if not state.methods:
-        raise FritzBoxError(f"Konnte Bestätigungsmethoden nicht ermitteln: {answer!r}")
-    on_prompt(state)
 
-    # Google Authenticator: wenn angeboten UND ein Secret vorliegt, direkt einen
-    # TOTP-Code einreichen (Feldname aus der echten twofactor.js der Box:
-    # POST /twofactor.lua mit tfa_googleauth=<6-stellig>; err==1 = Code falsch).
-    # HINWEIS: gegen eine echte Box mit eingerichtetem Authenticator NICHT
-    # live getestet – die Test-7590 bot nur button/dtmf an. Feldnamen und
-    # Fehler-Semantik stammen 1:1 aus dem ausgelieferten Box-JS.
-    if "googleauth" in state.methods and totp_secret:
+    # Ob der Google Authenticator nutzbar ist, steht NICHT im state-String
+    # (der kennt nur button/dtmf), sondern im separaten Objekt answer.googleauth
+    # – exakt wie es die echte twofactor.js auswertet (isAvailable && isConfigured;
+    # notfalls per tfa_googleauth_info nachgeladen).
+    ga = answer.get("googleauth")
+    if ga is None:
+        info = _post_form(f"http://{host}/twofactor.lua",
+                          {"sid": sid, "tfa_googleauth_info": ""}, timeout)
+        try:
+            ga = json.loads(info).get("googleauth")
+        except (json.JSONDecodeError, ValueError):
+            ga = None
+    ga_ready = bool(ga and ga.get("isAvailable") and ga.get("isConfigured"))
+    pollable = any(m in ("button", "dtmf") for m in state.methods)
+
+    display_methods = list(state.methods) + (["googleauth"] if ga_ready else [])
+    if not display_methods:
+        raise FritzBoxError(f"Konnte Bestätigungsmethoden nicht ermitteln: {answer!r}")
+    on_prompt(TwoFactorState(methods=display_methods, dtmf_code=state.dtmf_code))
+
+    # Google Authenticator: wenn eingerichtet UND ein Secret vorliegt, direkt einen
+    # TOTP-Code einreichen (POST /twofactor.lua mit tfa_googleauth=<6-stellig>;
+    # err==1 = Code falsch). Danach wird – wie beim Browser, dessen Poll parallel
+    # läuft – über tfa_active auf done/active gewartet, damit das Vertrauensfenster
+    # für die anschließende Umschaltung wirklich offen ist.
+    if ga_ready and totp_secret:
         code = totp.generate(totp_secret)
         body = _post_form(f"http://{host}/twofactor.lua",
                           {"sid": sid, "tfa_googleauth": code}, timeout)
         try:
-            answer = json.loads(body)
+            gans = json.loads(body)
         except (json.JSONDecodeError, ValueError):
             raise FritzBoxError(f"Unerwartete twofactor.lua-Antwort (tfa_googleauth): {body[:300]!r}")
-        if answer.get("err") == 1:
+        if gans.get("err") == 1:
             raise TwoFactorRejected(
                 "Google-Authenticator-Code abgelehnt (falsch oder abgelaufen) – "
                 "Secret und Systemuhrzeit prüfen."
             )
-        return
-
-    # Ohne Secret ist googleauth für uns nicht bedienbar; wenn die Box KEINE
-    # pollbare Methode (Taste/DTMF) anbietet, würden wir sonst nutzlos ins
-    # Timeout laufen – deshalb hier sofort mit klarer Meldung abbrechen.
-    if not any(m in ("button", "dtmf") for m in state.methods):
+        # weiter in die Poll-Schleife unten, um done/active zu bestätigen
+    elif not pollable:
+        # Nur der Authenticator ist verfügbar, aber ohne Secret nicht bedienbar –
+        # sofort abbrechen statt nutzlos ins Timeout zu laufen.
         raise TwoFactorRejected(
-            "Die Box verlangt Google Authenticator, es wurde aber kein "
+            "Die Box verlangt den Google Authenticator, es wurde aber kein "
             "TOTP-Secret angegeben (--totp-secret <BASE32> bzw. Feld in der GUI)."
         )
 

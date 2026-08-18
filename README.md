@@ -14,16 +14,18 @@ Es gibt eine **grafische Oberfläche (als Windows-`.exe`)** und ein
 
 1. Unter **[Releases](../../releases)** die aktuelle `fb2fa.exe` herunterladen
    (wird per GitHub Actions gebaut, siehe unten).
-2. Doppelklick. Felder ausfüllen:
-   - **FRITZ!Box-Adresse** (z. B. `192.168.0.1`)
-   - **Benutzername** / **Kennwort**
-   - **TOTP-Secret** – nur nötig, wenn die Box die Bestätigung *ausschließlich*
-     per Google Authenticator anbietet (siehe unten)
-   - Haken **„2FA aktivieren"** setzen zum Einschalten, weglassen zum Ausschalten
-3. **Ausführen**. Verlangt die Box eine Bestätigung, erscheint im Protokoll die
+2. Doppelklick. **FRITZ!Box-Adresse** eingeben — die **Benutzernamen der Box
+   werden automatisch geladen** und stehen als Auswahlliste bereit.
+3. Benutzer wählen, **Kennwort** eingeben (optional ein **TOTP-Secret**, nur
+   nötig, wenn die Box *ausschließlich* Google Authenticator anbietet — siehe
+   unten). Dann **„Verbinden / Status abfragen"**: der große **Schiebeschalter**
+   zeigt danach den aktuellen 2FA-Zustand.
+4. **Schiebeschalter umlegen** → 2FA wird an- bzw. ausgeschaltet (ein „Ausführen"-
+   Knopf entfällt). Verlangt die Box eine Bestätigung, erscheint im Protokoll die
    Aufforderung (samt DTMF-Code) — dann an der Box die **Verbindungstaste**
-   drücken bzw. den Code am Telefon eingeben. Das Ergebnis wird anschließend mit
-   einer frischen Anmeldung verifiziert.
+   drücken bzw. den Code am Telefon eingeben. Das Ergebnis wird mit einer
+   frischen Anmeldung verifiziert; bei Fehlschlag springt der Schalter auf den
+   echten Zustand zurück.
 
 Kein Neustart, kein Config-Datei-Patch.
 
