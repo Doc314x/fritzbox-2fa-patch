@@ -1,0 +1,42 @@
+name: Build Windows EXE
+
+# Baut die GUI mit PyInstaller zu einer einzelnen Windows-.exe.
+#  - Bei jedem Tag  v*  (z. B. v1.0.0): zusätzlich ein GitHub-Release mit der .exe.
+#  - Manuell über den "Run workflow"-Knopf: nur Build + Artefakt zum Herunterladen.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: PyInstaller installieren
+        run: pip install pyinstaller
+
+      - name: .exe bauen (onefile, ohne Konsolenfenster)
+        run: pyinstaller --onefile --windowed --name fb2fa fb2fa_gui.py
+
+      - name: Artefakt hochladen (für manuelle Läufe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fb2fa-windows-exe
+          path: dist/fb2fa.exe
+
+      - name: Release erstellen (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/fb2fa.exe
+          generate_release_notes: true

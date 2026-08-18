@@ -1,96 +1,140 @@
 # fritzbox-2fa-patch
 
-Werkzeug, um die Fritz!Box-Funktion **"Zusätzliche Bestätigung"** (2FA per
-Tastendruck/Google-Authenticator/DTMF für sicherheitsrelevante Aktionen)
-per Kommandozeile an- oder auszuschalten — seit FRITZ!OS 7.39 gibt es dafür
-keinen Menüpunkt mehr in der WebGUI.
+Werkzeug, um die Fritz!Box-Funktion **„Zusätzliche Bestätigung"** (2FA per
+Tastendruck / Google Authenticator / DTMF für sicherheitsrelevante Aktionen)
+an- oder auszuschalten — seit FRITZ!OS 7.39 gibt es dafür keinen Menüpunkt
+mehr in der WebGUI.
 
-## Der funktionierende Weg: `fb2fa 2fa`
+Es gibt eine **grafische Oberfläche (als Windows-`.exe`)** und ein
+**Kommandozeilen-Werkzeug**. Beide nutzen denselben, reboot-freien Weg.
+
+---
+
+## Schnellstart: die GUI (Windows-`.exe`)
+
+1. Unter **[Releases](../../releases)** die aktuelle `fb2fa.exe` herunterladen
+   (wird per GitHub Actions gebaut, siehe unten).
+2. Doppelklick. Felder ausfüllen:
+   - **FRITZ!Box-Adresse** (z. B. `192.168.0.1`)
+   - **Benutzername** / **Kennwort**
+   - **TOTP-Secret** – nur nötig, wenn die Box die Bestätigung *ausschließlich*
+     per Google Authenticator anbietet (siehe unten)
+   - Haken **„2FA aktivieren"** setzen zum Einschalten, weglassen zum Ausschalten
+3. **Ausführen**. Verlangt die Box eine Bestätigung, erscheint im Protokoll die
+   Aufforderung (samt DTMF-Code) — dann an der Box die **Verbindungstaste**
+   drücken bzw. den Code am Telefon eingeben. Das Ergebnis wird anschließend mit
+   einer frischen Anmeldung verifiziert.
+
+Kein Neustart, kein Config-Datei-Patch.
+
+---
+
+## Kommandozeile: `fb2fa 2fa`
+
+Stdlib-only, Python 3.10+, keine externen Abhängigkeiten.
 
 ```
-python3 -m fb2fa 2fa --host 192.168.0.1 --user <benutzername>
-python3 -m fb2fa 2fa --host 192.168.0.1 --user <benutzername> --enable
+python3 -m fb2fa 2fa --host 192.168.0.1 --user <benutzer>            # deaktivieren
+python3 -m fb2fa 2fa --host 192.168.0.1 --user <benutzer> --enable   # aktivieren
+python3 -m fb2fa gui                                                 # GUI starten
 ```
 
-Meldet sich an, fordert bei Bedarf eine 2FA-Bestätigung an der Box an
-(Tastendruck/DTMF), schaltet danach direkt um und verifiziert das Ergebnis.
-Kein Neustart, keine Config-Datei nötig.
+Kennwort wird interaktiv abgefragt (empfohlen) oder per `--password` übergeben.
 
-**Herkunft:** Der Endpunkt (`POST /data.lua` mit `page=support&twofactor=1`,
-das Formular `twoFactorDisableForm` auf der von AVM aus dem Menü entfernten,
-aber weiter vorhandenen "Support"-Seite) stammt nicht aus eigenem Raten,
-sondern aus dem tatsächlichen PHP-Quellcode von
-[fb_tools](https://www.mengelke.de/Projekte/FritzBox-Tools) (Michael
-Engelke), Plugin `fbtp_2fa.php`, extrahiert aus dem offiziell vertriebenen
-`.deb`-Paket. fb_tools ist ein etabliertes, seit Jahren gepflegtes
-Community-Werkzeug — dieses Tool hier bildet nur den einen Befehl in Python
-nach, mit Fokus auf Nachvollziehbarkeit und Verifikation.
+Meldet sich an, fordert bei Bedarf eine Bestätigung an der Box an, schaltet um
+und **verifiziert das Ergebnis mit einer frischen Anmeldung** (umgeht so das
+kurze 2FA-Vertrauensfenster, in dem eine gerade bestätigte Sitzung sonst ein
+falsches „OK" liefern könnte).
 
-**Verifiziert gegen eine echte FRITZ!Box 7590 (FRITZ!OS 154.08.25 / 8.25),
-vierfach unabhängig:**
-1. `tfa_needed()` liefert danach `False` (vorher `True`)
-2. TR-064 `X_AVM-DE_Auth.GetInfo` liefert `NewEnabled=0` (vorher `1`)
-3. Ein Config-Export läuft direkt im Anschluss **ganz ohne** erneute
-   Bestätigung durch
-4. Die exportierte Datei zeigt `two_factor_auth_enabled = no;`
-5. Praxistest: „Rufannahme sofort" (`call_delay=0`) lässt sich setzen, ohne
-   dass die Box eine Bestätigung verlangt
+### Google Authenticator
 
-Rundlauf getestet (aus → an → aus), jedes Mal selbstverifizierend.
+Bietet die Box als Bestätigung **nur** die Authenticator-App an (kein
+Tastendruck/DTMF), kann das Tool den TOTP-Code selbst erzeugen und einreichen —
+dafür das Base32-Secret angeben:
 
-## Alternativer Weg: Config-Datei patchen (funktioniert auch, mit Neustart)
+```
+python3 -m fb2fa 2fa --host 192.168.0.1 --user <benutzer> --totp-secret <BASE32>
+```
+
+Das Secret erhält man **einmalig** beim Einrichten in der Box-WebGUI
+(System → FRITZ!Box-Nutzer → Benutzer → Authenticator-App); es lässt sich später
+nicht mehr aus der Box auslesen und muss selbst gesichert werden.
+
+> Der googleauth-Pfad ist exakt nach der ausgelieferten `twofactor.js` der Box
+> nachgebildet (`POST /twofactor.lua` mit `tfa_googleauth=<Code>`), aber – anders
+> als der Tasten-/DTMF-Weg – noch **nicht** gegen eine echte Box mit
+> eingerichtetem Authenticator live getestet.
+
+---
+
+## Herkunft & Verifikation
+
+Der Endpunkt (`POST /data.lua` mit `page=support&twofactor=1`, Formular
+`twoFactorDisableForm` auf der aus dem Menü entfernten, aber weiter vorhandenen
+„Support"-Seite) stammt aus dem PHP-Quellcode von
+[fb_tools](https://www.mengelke.de/Projekte/FritzBox-Tools) (Michael Engelke),
+Plugin `fbtp_2fa.php`.
+
+**Live verifiziert gegen eine echte FRITZ!Box 7590 (FRITZ!OS 154.08):** Der
+Direkt-Umschalter läuft reboot-frei durch (Login → Bestätigung per Taste →
+Umschaltung → Selbst-Verifikation) und wurde im Wechsel (an → aus → an)
+mehrfach bestätigt.
+
+---
+
+## Alternativer Weg: Config-Datei patchen
 
 Der klassische Community-Workaround: Config exportieren,
-`two_factor_auth_enabled = yes;` in der Sicherungsdatei von Hand auf `no`
-ändern (z. B. mit dem [Fritz!Box JSTool von Michael
-Engelke](https://www.mengelke.de/)), Prüfsumme neu berechnen, Datei wieder
-einspielen. Dieser Weg ist in diesem Repo ebenfalls implementiert (`fb2fa
-export`, `fb2fa patch`, `fb2fa import-all`).
+`two_factor_auth_enabled = yes;` in der Sicherungsdatei auf `no` ändern,
+Prüfsumme neu berechnen, Datei wieder einspielen.
 
-**Klargestellt per echtem Vergleichstest:** Über den echten Browser/das
-JSTool + reguläre "Wiederherstellen"-Funktion der Box **funktioniert das**
-— sauber verifiziert mit einem unkontaminierten Test (frischer Export vor
-jeder Änderung → lokal gepatcht → reimportiert → Neustart anhand
-zurückgesetztem internen Zeitstempel bestätigt → frischer Export danach
-zeigt `two_factor_auth_enabled = no`). Löst dabei, anders als `fb2fa 2fa`,
-einen Neustart aus (Telefonie/Internet kurz weg).
+Die **Prüfsummen-Berechnung ist byte-genau gegen den Referenz-Editor
+[Fritz!Box JSTool](https://www.mengelke.de/) verifiziert**: Aus derselben
+Originaldatei erzeugt `fb2fa patch` ein Ergebnis, das *Byte für Byte* mit der
+JSTool-gepatchten Datei übereinstimmt (identische CRC32-Prüfsumme). Der
+Algorithmus ist Standard-CRC32 (Polynom `0xEDB88320`), portiert von
+[lpinca/fritzbox-checksum](https://github.com/lpinca/fritzbox-checksum) (MIT).
 
-**Offene Frage:** Die eigene, rein API-gesteuerte Nachbildung dieses
-Ablaufs in `fb2fa import-all` (ohne echten Browser) hat in zwei eigenen
-Tests **nicht** funktioniert, obwohl eine Kontrollprobe (`tfa_cfg_version`
-in einem Nachbarfeld geändert) im selben Lauf korrekt persistiert wurde.
-Es muss also einen Unterschied zwischen dem echten Browser-Upload und dem
-hier implementierten Multipart-Request geben, der bislang nicht gefunden
-wurde — `fb2fa import-all` sollte deshalb noch nicht blind vertraut werden,
-auch wenn der CRC32-Mechanismus selbst (Prüfsummenberechnung) nachweislich
-korrekt arbeitet. Für produktiven Einsatz bis auf Weiteres: `fb2fa 2fa`
-(oben) oder der manuelle Weg über die echte WebGUI/das JSTool.
+- `fb2fa export  --host ... --user ... --out backup.export`
+- `fb2fa list-vars backup.export [--grep <text>]`
+- `fb2fa verify  backup.export`
+- `fb2fa patch   backup.export --value no --out patched.export`
+- `fb2fa import-all --host ... --user ... patched.export` — **Voll-Import,
+  löst einen Neustart aus**
 
-## Setup
+> **Hinweis (früher offene Frage, jetzt geklärt):** Der *selektive* Import
+> (nur die Gruppe „FRITZ!Box-Benutzer") schreibt `two_factor_auth_enabled`
+> sehr wohl — das wurde live bestätigt. Die frühere Beobachtung „wirkt nicht"
+> war ein **Verifikations-Timing-Problem**: der Apply wirkt verzögert (Reboot),
+> eine zu frühe Nachkontrolle liest noch den alten Stand. Für den Alltag ist
+> der reboot-freie **`fb2fa 2fa`-Direktweg (oben) klar vorzuziehen** — der
+> Config-Import bleibt der schwerere Weg mit Neustart.
 
-Keine externen Abhängigkeiten (stdlib-only), Python 3.10+.
+---
+
+## Aus dem Quellcode bauen (Windows-`.exe`)
+
+Die `.exe` wird von **GitHub Actions** gebaut (`.github/workflows/build.yml`):
+
+- **Automatisch** bei jedem Git-Tag `v*` (z. B. `v1.0.0`) → zusätzlich ein
+  **Release** mit angehängter `fb2fa.exe`.
+- **Manuell** über *Actions → Build Windows EXE → Run workflow* → die `.exe`
+  liegt danach als Artefakt zum Download bereit.
+
+Lokal auf Windows selbst bauen:
 
 ```
-python3 -m fb2fa 2fa --host 192.168.0.1 --user <benutzername>
+pip install pyinstaller
+pyinstaller --onefile --windowed --name fb2fa fb2fa_gui.py
+# Ergebnis: dist\fb2fa.exe
 ```
 
-Passwort wird interaktiv abgefragt (empfohlen), oder per `--password`.
+(PyInstaller kann nicht cross-kompilieren — eine Windows-`.exe` entsteht nur auf
+Windows bzw. auf dem Windows-Runner.)
 
-## Weitere Befehle (Config-Export/Patch/Import, für andere Einstellungen)
+---
 
-- `fb2fa export --host ... --user ... --out backup.export`
-- `fb2fa list-vars backup.export [--grep <text>]` — Top-Level-Variablen auflisten
-- `fb2fa patch backup.export --key <name> --value <wert> --out patched.export`
-- `fb2fa verify backup.export` — Prüfsumme kontrollieren
-- `fb2fa import-all --host ... --user ... patched.export` — vollständiger
-  Reimport, **löst einen Neustart aus**, Telefonie/Internet kurz weg
+## Sicherheit
 
-Für Felder außerhalb von `two_factor_auth_enabled` (das AVM schützt) ist
-dieser Weg voll funktionsfähig — die Prüfsummenberechnung wurde gegen die
-echte Box verifiziert (Selbsttest mit synthetischer Beispieldatei plus
-Kontrollprobe mit echtem Feld, siehe oben).
-
-`fb2fa import-selective-start` (selektiver Import einzelner
-Einstellungsgruppen statt der ganzen Config) ist ebenfalls implementiert,
-aber weniger gut getestet — für die eigentliche 2FA-Frage inzwischen
-irrelevant, da der `fb2fa 2fa`-Befehl das Problem direkt löst.
+Die Export-/Backup-Dateien enthalten **alle** Box-Einstellungen (inkl.
+Zugangsdaten) — sicher aufbewahren, **nicht** ins Repo committen.

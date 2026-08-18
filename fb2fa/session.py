@@ -36,6 +36,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable
 
+from . import totp
+
 
 class FritzBoxError(Exception):
     pass
@@ -184,9 +186,12 @@ def _split_state(state: str) -> TwoFactorState:
 
 def run_twofactor(host: str, sid: str, timeout: float = 10,
                    on_prompt: Callable[[TwoFactorState], None] = None,
-                   poll_interval: float = 1.5, max_wait: float = 180) -> None:
+                   poll_interval: float = 1.5, max_wait: float = 180,
+                   totp_secret: str | None = None) -> None:
     """Stößt eine Bestätigung an und wartet, bis der Nutzer sie an der Box
-    (Taste/Google-Authenticator/DTMF) durchgeführt hat.
+    (Taste/DTMF) durchgeführt hat – oder bestätigt automatisch per Google
+    Authenticator, wenn ein `totp_secret` (Base32) übergeben wird und die Box
+    diese Methode anbietet.
 
     on_prompt wird einmal mit den verfügbaren Methoden aufgerufen, sobald
     bekannt (zum Anzeigen an den Nutzer) – Standard: print().
@@ -215,6 +220,36 @@ def run_twofactor(host: str, sid: str, timeout: float = 10,
         raise FritzBoxError(f"Konnte Bestätigungsmethoden nicht ermitteln: {answer!r}")
     on_prompt(state)
 
+    # Google Authenticator: wenn angeboten UND ein Secret vorliegt, direkt einen
+    # TOTP-Code einreichen (Feldname aus der echten twofactor.js der Box:
+    # POST /twofactor.lua mit tfa_googleauth=<6-stellig>; err==1 = Code falsch).
+    # HINWEIS: gegen eine echte Box mit eingerichtetem Authenticator NICHT
+    # live getestet – die Test-7590 bot nur button/dtmf an. Feldnamen und
+    # Fehler-Semantik stammen 1:1 aus dem ausgelieferten Box-JS.
+    if "googleauth" in state.methods and totp_secret:
+        code = totp.generate(totp_secret)
+        body = _post_form(f"http://{host}/twofactor.lua",
+                          {"sid": sid, "tfa_googleauth": code}, timeout)
+        try:
+            answer = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            raise FritzBoxError(f"Unerwartete twofactor.lua-Antwort (tfa_googleauth): {body[:300]!r}")
+        if answer.get("err") == 1:
+            raise TwoFactorRejected(
+                "Google-Authenticator-Code abgelehnt (falsch oder abgelaufen) – "
+                "Secret und Systemuhrzeit prüfen."
+            )
+        return
+
+    # Ohne Secret ist googleauth für uns nicht bedienbar; wenn die Box KEINE
+    # pollbare Methode (Taste/DTMF) anbietet, würden wir sonst nutzlos ins
+    # Timeout laufen – deshalb hier sofort mit klarer Meldung abbrechen.
+    if not any(m in ("button", "dtmf") for m in state.methods):
+        raise TwoFactorRejected(
+            "Die Box verlangt Google Authenticator, es wurde aber kein "
+            "TOTP-Secret angegeben (--totp-secret <BASE32> bzw. Feld in der GUI)."
+        )
+
     deadline = time.monotonic() + max_wait
     while time.monotonic() < deadline:
         time.sleep(poll_interval)
@@ -231,13 +266,14 @@ def run_twofactor(host: str, sid: str, timeout: float = 10,
 
 
 def ensure_confirmed(host: str, sid: str, page: str, timeout: float = 10,
-                      on_prompt: Callable[[TwoFactorState], None] = None) -> None:
+                      on_prompt: Callable[[TwoFactorState], None] = None,
+                      totp_secret: str | None = None) -> None:
     """Prüft tfaNeeded für die gegebene Seite und führt bei Bedarf den
     Bestätigungsfluss durch. Danach ist die SID für die anschließende
     firmwarecfg-Anfrage innerhalb eines beobachteten Vertrauensfensters
     bestätigt (siehe docs im Haupt-README zum beobachteten Verhalten)."""
     if tfa_needed(host, sid, page, timeout):
-        run_twofactor(host, sid, timeout, on_prompt)
+        run_twofactor(host, sid, timeout, on_prompt, totp_secret=totp_secret)
 
 
 # ── "Zusätzliche Bestätigung" (2FA) direkt umschalten ───────────────────────

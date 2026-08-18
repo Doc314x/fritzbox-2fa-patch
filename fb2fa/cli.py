@@ -31,13 +31,18 @@ def _cmd_2fa(args):
     action = "aktivieren" if args.enable else "deaktivieren"
     print(f"'Zusätzliche Bestätigung' wird {action}...")
     if session.tfa_needed(args.host, sid, "sysSave"):
-        session.run_twofactor(args.host, sid, on_prompt=prompt)
+        session.run_twofactor(args.host, sid, on_prompt=prompt, totp_secret=args.totp_secret)
         print("Bestätigt, sende Umschaltung...")
     else:
         print("Aktuell keine Bestätigung nötig (2FA derzeit aus), sende Umschaltung direkt...")
     session.set_additional_confirmation(args.host, sid, args.enable)
 
-    still_needed = session.tfa_needed(args.host, sid, "sysSave")
+    # Verifikation bewusst mit einer FRISCHEN Anmeldung: die gerade eben per
+    # run_twofactor() bestätigte SID liegt in einem 2FA-Vertrauensfenster, in
+    # dem tfa_needed() auch dann False liefern kann, wenn 2FA noch an ist –
+    # das würde einen fehlgeschlagenen Toggle als Erfolg durchgehen lassen.
+    verify_sid = session.login(args.host, args.user, password)
+    still_needed = session.tfa_needed(args.host, verify_sid, "sysSave")
     if still_needed == args.enable:
         print("Umschaltung verifiziert (tfa_needed passt zum neuen Zustand).")
     else:
@@ -59,7 +64,7 @@ def _cmd_export(args):
 
     if session.tfa_needed(args.host, sid, "sysSave"):
         print("Export verlangt eine Bestätigung an der Box.")
-        session.ensure_confirmed(args.host, sid, "sysSave")
+        session.ensure_confirmed(args.host, sid, "sysSave", totp_secret=args.totp_secret)
         print("Bestätigt.")
     else:
         print("Keine Bestätigung nötig (unerwartet, bitte Ergebnis prüfen).")
@@ -123,12 +128,17 @@ def _cmd_import_all(args):
     sid = session.login(args.host, args.user, password)
     if session.tfa_needed(args.host, sid, "sysImp"):
         print("Import verlangt eine Bestätigung an der Box.")
-        session.ensure_confirmed(args.host, sid, "sysImp")
+        session.ensure_confirmed(args.host, sid, "sysImp", totp_secret=args.totp_secret)
         print("Bestätigt.")
 
     body = session.import_config_all(args.host, sid, file_password, content)
     print("Antwort der Box:", body[:300])
     print("Die Box startet jetzt voraussichtlich neu.")
+
+
+def _cmd_gui(args):
+    from . import gui
+    gui.main()
 
 
 def _cmd_import_selective_start(args):
@@ -140,7 +150,7 @@ def _cmd_import_selective_start(args):
     sid = session.login(args.host, args.user, password)
     if session.tfa_needed(args.host, sid, "sysImp"):
         print("Import verlangt eine Bestätigung an der Box.")
-        session.ensure_confirmed(args.host, sid, "sysImp")
+        session.ensure_confirmed(args.host, sid, "sysImp", totp_secret=args.totp_secret)
         print("Bestätigt.")
 
     body = session.start_selective_import(args.host, sid, file_password, content)
@@ -164,6 +174,11 @@ def main(argv=None):
     common.add_argument("--host", default="192.168.0.1")
     common.add_argument("--user", required=True)
     common.add_argument("--password", help="Falls weggelassen: interaktive Abfrage (empfohlen).")
+    common.add_argument(
+        "--totp-secret",
+        help="Base32-Secret des Google Authenticators (nur nötig, wenn die Box "
+             "die Bestätigung ausschließlich per Authenticator-App anbietet).",
+    )
 
     p_2fa = sub.add_parser(
         "2fa", parents=[common],
@@ -171,6 +186,9 @@ def main(argv=None):
     )
     p_2fa.add_argument("--enable", action="store_true", help="Aktivieren statt deaktivieren.")
     p_2fa.set_defaults(func=_cmd_2fa)
+
+    p_gui = sub.add_parser("gui", help="Grafische Oberfläche starten (Eingabefelder statt Kommandozeile).")
+    p_gui.set_defaults(func=_cmd_gui)
 
     p_export = sub.add_parser("export", parents=[common], help="Konfiguration exportieren.")
     p_export.add_argument("--file-password", help="Kennwort für die Exportdatei (interaktiv, falls weggelassen).")
