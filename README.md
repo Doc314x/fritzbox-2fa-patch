@@ -140,3 +140,26 @@ Windows bzw. auf dem Windows-Runner.)
 
 Die Export-/Backup-Dateien enthalten **alle** Box-Einstellungen (inkl.
 Zugangsdaten) — sicher aufbewahren, **nicht** ins Repo committen.
+
+Das Werkzeug braucht die **normalen Anmeldedaten deiner Box** (Benutzer +
+Kennwort) und ändert nur eine Einstellung, die AVM aus dem Menü entfernt hat —
+es umgeht keine Anmeldung und ist kein „Exploit". Wer die Box-Zugangsdaten hat,
+ist ihr Administrator.
+
+---
+
+## Lizenz
+
+[MIT](LICENSE). Der CRC32-Prüfsummenteil ist von
+[lpinca/fritzbox-checksum](https://github.com/lpinca/fritzbox-checksum) (MIT)
+portiert; der 2FA-Endpunkt stammt aus
+[fb_tools](https://www.mengelke.de/Projekte/FritzBox-Tools) (Michael Engelke).
+
+## Haftungsausschluss
+
+Kein offizielles AVM-Produkt und nicht mit AVM verbunden. „FRITZ!Box" und
+„FRITZ!OS" sind Marken der AVM GmbH. Nutzung auf **eigene Gefahr, ohne jede
+Gewähr** — das Werkzeug spricht undokumentierte Endpunkte der Box an, die sich
+mit FRITZ!OS-Updates ändern können. Der Config-Import-Weg (`import-all`) löst
+einen **Neustart** der Box aus (Telefonie/Internet kurz weg). Vor Änderungen an
+der Konfiguration eine Sicherung anlegen.
